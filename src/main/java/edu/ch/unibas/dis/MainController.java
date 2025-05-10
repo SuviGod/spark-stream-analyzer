@@ -8,7 +8,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/stream")
 @RestController
 public class MainController {
-    private SparkStreamingService sparkService;
+
+    private final SparkStreamingService sparkService;
+
+    public MainController(SparkStreamingService sparkService) {
+        this.sparkService = sparkService;
+    }
 
     @PostMapping("/start")
     public String startStream() {

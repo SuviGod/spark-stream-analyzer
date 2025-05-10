@@ -1,5 +1,10 @@
-### GET request to example server
-GET https://examples.http-client.intellij.net/get
-    ?generated-in=IntelliJ IDEA
+### Start the stream
+POST http://localhost:8080/api/stream/start
+Content-Type: application/json
 
-###
+### Stop the stream
+POST http://localhost:8080/api/stream/stop
+Content-Type: application/json
+
+### Get stream status
+GET http://localhost:8080/api/stream/status
