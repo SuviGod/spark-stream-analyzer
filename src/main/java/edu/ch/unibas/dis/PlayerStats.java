@@ -17,6 +17,6 @@ public class PlayerStats {
     private long kills;
     private long deaths;
     private long assists;
-    private float kdRatio;
+    private double kdRatio;
 
 }

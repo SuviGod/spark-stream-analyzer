@@ -67,6 +67,7 @@ public class SparkStreamingService {
                 .master("local[*]")
                 .config("spark.sql.streaming.checkpointLocation", CHECKPOINT_LOCATION)
                 .getOrCreate();
+        spark.sparkContext().setLogLevel("WARN");
     }
 
     @Async
@@ -81,7 +82,7 @@ public class SparkStreamingService {
                 .format("kafka")
                 .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
                 .option("subscribe", KAFKA_TOPIC_KILLS)
-                .option("startingOffsets", "earliest")
+                .option("startingOffsets", "latest")
                 .option("failOnDataLoss", false)
                 .load()
                 .selectExpr("CAST(value AS STRING)")
@@ -107,27 +108,79 @@ public class SparkStreamingService {
             return list.iterator();
         }, Encoders.bean(KillRelatedEvent.class));
 
-        Dataset<Row> statsStream = events
-                .groupBy("player")
-                .pivot("type", java.util.Arrays.asList("kill", "death", "assist"))
-                .count()
-                .na().fill(0)
-                .withColumn("kdRatio", functions.when(functions.col("death").equalTo(0), functions.col("kill"))
-                        .otherwise(functions.col("kill").divide(functions.col("death"))))
-                .select(
-                        functions.col("player").as("playerName"),
-//                        functions.col("second"),
-                        functions.col("kill").as("kills"),
-                        functions.col("death").as("deaths"),
-                        functions.col("assist").as("assists"),
-                        functions.col("kdRatio")
-                );
-
-
-        // 4) Every 1 second micro-batch, write out via JPA
-
+//        Dataset<Row> statsStream = events
+//                .groupBy("player")
+//                .pivot("type", java.util.Arrays.asList("kill", "death", "assist"))
+//                .count()
+//                .na().fill(0)
+//                .withColumn("kdRatio", functions.when(functions.col("death").equalTo(0), functions.col("kill"))
+//                        .otherwise(functions.col("kill").divide(functions.col("death"))))
+//                .select(
+//                        functions.col("player").as("playerName"),
+////                        functions.col("second"),
+//                        functions.col("kill").as("kills"),
+//                        functions.col("death").as("deaths"),
+//                        functions.col("assist").as("assists"),
+//                        functions.col("kdRatio")
+//                );
         try {
-            // Store the query reference for stopping later
+            query = events
+                    .groupBy("player", "type")
+                    .count()
+                    .withColumn("count", functions.col("count").cast("long"))
+                    .selectExpr("player", "type", "count")
+                    .writeStream()
+                    .outputMode("update")
+                    .format("console")
+                    .start();
+        } catch (TimeoutException e) {
+            throw new RuntimeException(e);
+        }
+//        try {
+//            query = events
+//                    .groupBy("player", "type")
+//                    .count()
+//                    .withColumn("count", functions.col("count").cast("long"))
+//                    .selectExpr("player", "type", "count")
+//                    .writeStream()
+//                    .outputMode("update")
+//                    .foreachBatch((batchDF, batchId) -> {
+//                        Dataset<Row> pivotedBatch = batchDF
+//                                .groupBy("player")
+//                                .pivot("type", java.util.Arrays.asList("kill", "death", "assist"))
+//                                .agg(functions.sum("count"))
+//                                .na().fill(0) // Fill nulls with 0
+//                                .withColumn("kdRatio", functions.when(functions.col("death").equalTo(0), functions.col("kill"))
+//                                        .otherwise(functions.col("kill").divide(functions.col("death"))))
+//                                .select(
+//                                        functions.col("player").as("playerName"),
+//                                        functions.col("kill").as("kills"),
+//                                        functions.col("death").as("deaths"),
+//                                        functions.col("assist").as("assists"),
+//                                        functions.col("kdRatio")
+//                                );
+//
+//                        // Persist each row
+//                        pivotedBatch.collectAsList().forEach(row -> {
+//                            PlayerStats ps = new PlayerStats();
+//                            ps.setPlayerName(row.getAs("playerName"));
+//                            ps.setSecond(Time.now());
+//                            ps.setKills(row.getAs("kills"));
+//                            ps.setDeaths(row.getAs("deaths"));
+//                            ps.setAssists(row.getAs("assists"));
+//                            ps.setKdRatio(row.getAs("kdRatio"));
+//                            repository.save(ps);
+//                        });
+//                    })
+//                    .option("checkpointLocation", CHECKPOINT_LOCATION)
+//                    .start();
+//            query.awaitTermination();
+//        } catch (TimeoutException | StreamingQueryException e) {
+//            throw new RuntimeException(e);
+//        }
+
+
+        // Store the query reference for stopping later
 //            query = statsStream.writeStream()
 //                    .outputMode("complete")
 //                    .trigger(Trigger.ProcessingTime("1 second"))
@@ -145,37 +198,35 @@ public class SparkStreamingService {
 //                        });
 //                    })
 //                    .start();
-            query = statsStream
-                    .writeStream()
-                    .outputMode("complete")                                  // full aggregation mode
-                    .trigger(Trigger.ProcessingTime("1 second"))             // 1s micro-batches
-                    .foreachBatch((batchDF, batchId) -> {
-                        // 1) write to console for debugging:
-                        batchDF.show(false);
-
-                        // 2) persist each row:
-                        batchDF.collectAsList().forEach(row -> {
-                            PlayerStats ps = new PlayerStats();
-                            ps.setPlayerName( row.getAs("playerName") );
-//                            ps.setSecond(     row.getAs("second") );
-                            ps.setSecond(Time.now() );
-
-                            ps.setKills(      row.getAs("kills") );
-                            ps.setDeaths(     row.getAs("deaths") );
-                            ps.setAssists(    row.getAs("assists") );
-                            ps.setKdRatio(    row.getAs("kdRatio") );
-                            repository.save(ps);
-                        });
-                    })
-                    .option("checkpointLocation", CHECKPOINT_LOCATION)
-                    .start();
-
-            query.awaitTermination();
+//            query = statsStream
+//                    .writeStream()
+//                    .outputMode("complete")                                  // full aggregation mode
+//                    .trigger(Trigger.ProcessingTime("1 second"))             // 1s micro-batches
+//                    .foreachBatch((batchDF, batchId) -> {
+//                        // 1) write to console for debugging:
+//                        batchDF.show(false);
+//
+//                        // 2) persist each row:
+//                        batchDF.collectAsList().forEach(row -> {
+//                            PlayerStats ps = new PlayerStats();
+//                            ps.setPlayerName( row.getAs("playerName") );
+////                            ps.setSecond(     row.getAs("second") );
+//                            ps.setSecond(Time.now() );
+//
+//                            ps.setKills(      row.getAs("kills") );
+//                            ps.setDeaths(     row.getAs("deaths") );
+//                            ps.setAssists(    row.getAs("assists") );
+//                            ps.setKdRatio(    row.getAs("kdRatio") );
+//                            repository.save(ps);
+//                        });
+//                    })
+//                    .option("checkpointLocation", CHECKPOINT_LOCATION)
+//                    .start();
+//
+//            query.awaitTermination();
 
 //            query.awaitTermination();
-        } catch (TimeoutException | StreamingQueryException e) {
-            log.error("Error in streaming query", e);
-        }
+
     }
 
     public void stopStreaming() {
