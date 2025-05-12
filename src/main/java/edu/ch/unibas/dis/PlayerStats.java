@@ -18,5 +18,7 @@ public class PlayerStats {
     private long deaths;
     private long assists;
     private double kdRatio;
+    private double damagePerRound;
+    private long damage;
 
 }

@@ -7,4 +7,5 @@ public class PlayerState {
     public long kills;
     public long deaths;
     public long assists;
+    public long damage;
 }
