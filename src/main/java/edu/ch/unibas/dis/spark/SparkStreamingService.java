@@ -1,8 +1,13 @@
-package edu.ch.unibas.dis;
+package edu.ch.unibas.dis.spark;
 
-import lombok.Data;
+import edu.ch.unibas.dis.entity.PlayerStats;
+import edu.ch.unibas.dis.model.Event;
+import edu.ch.unibas.dis.model.PlayerState;
+import edu.ch.unibas.dis.repository.PlayerRepository;
+import edu.ch.unibas.dis.repository.PlayerStatsRepository;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.spark.api.java.function.FilterFunction;
 import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.api.java.function.MapFunction;
@@ -13,11 +18,11 @@ import org.apache.spark.sql.types.StructType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import scala.Function1;
 import scala.runtime.AbstractFunction1;
 import scala.Serializable;
 
 import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -55,11 +60,15 @@ public class SparkStreamingService {
     private boolean isRunning = false;
 
 //    @Autowired
-    private final PlayerStatsRepository repository;
+    private final PlayerStatsRepository playerStatsRepository;
 
-    public SparkStreamingService(PlayerStatsRepository repository) {
+    private final PlayerRepository playerRepository;
 
-        this.repository = repository;
+    public SparkStreamingService(PlayerStatsRepository playerStatsRepository,
+                                 PlayerRepository playerRepository) {
+
+        this.playerStatsRepository = playerStatsRepository;
+        this.playerRepository = playerRepository;
     }
 
     @PostConstruct
@@ -67,10 +76,19 @@ public class SparkStreamingService {
         spark = SparkSession.builder()
                 .appName("CS Stats Streaming")
                 .master("local[*]")
-                .config("spark.sql.streaming.checkpointLocation", CHECKPOINT_LOCATION)
+//                .config("spark.sql.streaming.checkpointLocation", CHECKPOINT_LOCATION)
                 .getOrCreate();
         spark.sparkContext().setLogLevel("WARN");
     }
+
+    @PreDestroy
+    public void onShutdown() {
+        // This method is executed when the application context is closing.
+        log.info("Shutting down SparkStreamingService...");
+        stopStreaming();
+    }
+
+
 
     @Async
     public void startStreaming() {
@@ -79,36 +97,21 @@ public class SparkStreamingService {
         }
         isRunning = true;
 
-        Dataset<Event> events = getKillRelatedEvents().union(getDamageRelatedEvents());
-        // 3) Key by playerName and apply stateful updater
-        Encoder<Row> rowEnc = RowEncoder.apply(new StructType()
-                .add("playerName", "string")
-                .add("second", "long")
-                .add("kills", "long")
-                .add("deaths", "long")
-                .add("assists", "long")
-                .add("damage", "long")
-                .add("kdRatio", "double")
-                .add("damagePerRound", "double")
-        );
+        Dataset<Event> events = getKillRelatedEvents()
+                .union(getDamageRelatedEvents());
 
-        PlayerStatsUpdater updater = new PlayerStatsUpdater();
-        Dataset<Row> statsStream = events
-                .groupByKey(new PlayerExtractor(), Encoders.STRING())
-                .mapGroupsWithState(
-                        updater,
-                        Encoders.bean(PlayerState.class),
-                        rowEnc
-                );
+        Dataset<Row> statsStream = groupEvents(events);
 
-        simpleOutput(statsStream);
+        outputToDatabase(statsStream);
+//        simpleOutput(statsStream);
     }
 
     public void stopStreaming() {
         if (query != null && isRunning) {
             try {
                 query.stop();
-                repository.deleteAll();
+                playerStatsRepository.deleteAll();
+                playerRepository.deleteAll();
             } catch (Exception e) {
                 log.error("Error stopping streaming query", e);
             }
@@ -138,8 +141,7 @@ public class SparkStreamingService {
             String killer = cols[3];
             String killer_id = cols[4];
             if (!killer.isEmpty()) {
-                list.add(new Event(
-                        killer,
+                list.add(new Event(killer,
                         killer_id,
                         "kill",
                         sec,
@@ -209,6 +211,29 @@ public class SparkStreamingService {
                 .filter((FilterFunction<Event>) Objects::nonNull);
     }
 
+    private Dataset<Row> groupEvents(Dataset<Event> events){
+        Encoder<Row> rowEnc = RowEncoder.apply(new StructType()
+                .add("playerName", "string")
+                .add( "steamId", "string")
+                .add("second", "long")
+                .add("kills", "long")
+                .add("deaths", "long")
+                .add("assists", "long")
+                .add("damage", "long")
+                .add("kdRatio", "double")
+                .add("damagePerRound", "double")
+        );
+
+        return events
+                .groupByKey(new PlayerExtractor(), Encoders.STRING())
+                .mapGroupsWithState(
+                        new PlayerStatsUpdater(),
+                        Encoders.bean(PlayerState.class),
+                        rowEnc
+                );
+
+    }
+
 
     private void simpleOutput(Dataset<Row> datasetToOutput){
         try {
@@ -224,6 +249,7 @@ public class SparkStreamingService {
     }
 
 
+
     private void outputToDatabase(Dataset<Row> datasetToOutput){
         try {
             query = datasetToOutput
@@ -234,24 +260,35 @@ public class SparkStreamingService {
                         // collect to driver and save one by one
                         batchDF.collectAsList().forEach(row -> {
                             PlayerStats ps = new PlayerStats();
-                            ps.setPlayerName(row.getString(0));
-                            ps.setSecond(row.getLong(1));
-                            ps.setKills(row.getLong(2));
-                            ps.setDeaths(row.getLong(3));
-                            ps.setAssists(row.getLong(4));
-                            ps.setDamage(row.getLong(5));
-                            ps.setKdRatio(row.getDouble(6));
-                            ps.setDamagePerRound(row.getDouble(7));
-                            repository.save(ps);
+                            String name = row.getString(0);
+                            String steamId = row.getString(1);
+                            name = StringUtils.isBlank(name) ?
+                                    playerRepository.findBySteamId(steamId).getName() : name;
+                            ps.setPlayerName(name);
+                            ps.setSecond(row.getLong(2));
+                            ps.setKills(row.getLong(3));
+                            ps.setDeaths(row.getLong(4));
+                            ps.setAssists(row.getLong(5));
+                            ps.setDamage(row.getLong(6));
+                            ps.setKdRatio(row.getDouble(7));
+                            ps.setDamagePerRound(row.getDouble(8));
+                            playerStatsRepository.save(ps);
                         });
                     })
                     .start();
 
-            query.awaitTermination();
+            // Start a new thread to await termination
+            new Thread(() -> {
+                try {
+                    query.awaitTermination();
+                } catch (StreamingQueryException e) {
+                    log.error("Error in streaming query", e);
+                    throw new RuntimeException(e);
+                }
+            }).start();
 
         } catch (TimeoutException e) {
             log.error("Error in streaming query", e);
-        } catch (StreamingQueryException e) {
             throw new RuntimeException(e);
         }
     }

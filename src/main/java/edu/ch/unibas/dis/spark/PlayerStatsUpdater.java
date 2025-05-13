@@ -1,5 +1,7 @@
-package edu.ch.unibas.dis;
+package edu.ch.unibas.dis.spark;
 
+import edu.ch.unibas.dis.model.Event;
+import edu.ch.unibas.dis.model.PlayerState;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.spark.api.java.function.MapGroupsWithStateFunction;
 import org.apache.spark.sql.Row;
@@ -36,7 +38,8 @@ public class PlayerStatsUpdater
 
         // build a Row matching PlayerStats entity
         return RowFactory.create(
-                StringUtils.isBlank(name) ? playerSteamId : name,
+                StringUtils.isBlank(name) ? "" : name,
+                playerSteamId,
                 currentSecond,
                 playerState.kills,
                 playerState.deaths,

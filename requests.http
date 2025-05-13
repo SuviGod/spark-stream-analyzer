@@ -1,5 +1,5 @@
 ### Start the stream
-POST http://localhost:8080/api/stream/start
+POST http://localhost:8080/api/stream/start?folderPath=C:\Users\vanom\IdeaProjects\DIS1\game-logs
 Content-Type: application/json
 
 ### Stop the stream

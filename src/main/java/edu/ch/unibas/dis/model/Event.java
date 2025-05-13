@@ -1,4 +1,4 @@
-package edu.ch.unibas.dis;
+package edu.ch.unibas.dis.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

@@ -1,4 +1,4 @@
-package edu.ch.unibas.dis;
+package edu.ch.unibas.dis.entity;
 
 import lombok.Data;
 
