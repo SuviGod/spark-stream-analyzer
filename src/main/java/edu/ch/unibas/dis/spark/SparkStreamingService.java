@@ -95,6 +95,7 @@ public class SparkStreamingService {
         if (isRunning) {
             return;
         }
+        playerStatsRepository.deleteAll();
         isRunning = true;
 
         Dataset<Event> events = getKillRelatedEvents()
@@ -110,8 +111,8 @@ public class SparkStreamingService {
         if (query != null && isRunning) {
             try {
                 query.stop();
-                playerStatsRepository.deleteAll();
-                playerRepository.deleteAll();
+//                playerStatsRepository.deleteAll();
+//                playerRepository.deleteAll();
             } catch (Exception e) {
                 log.error("Error stopping streaming query", e);
             }

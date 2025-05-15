@@ -34,6 +34,7 @@ public class PlayerService {
 
             logger.info("Fetched {} players from external service", players.size());
 
+            playerRepository.deleteAll();
             List<Player> savedPlayers = playerRepository.saveAll(players);
 
             logger.info("Saved {} players to database", savedPlayers.size());
