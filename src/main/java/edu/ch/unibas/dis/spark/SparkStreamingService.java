@@ -1,5 +1,6 @@
 package edu.ch.unibas.dis.spark;
 
+import edu.ch.unibas.dis.entity.Player;
 import edu.ch.unibas.dis.entity.PlayerStats;
 import edu.ch.unibas.dis.model.Event;
 import edu.ch.unibas.dis.model.PlayerState;
@@ -263,8 +264,14 @@ public class SparkStreamingService {
                             PlayerStats ps = new PlayerStats();
                             String name = row.getString(0);
                             String steamId = row.getString(1);
-                            name = StringUtils.isBlank(name) ?
-                                    playerRepository.findBySteamId(steamId).getName() : name;
+//                            name = StringUtils.isBlank(name) ?
+//                                    playerRepository.findBySteamId(steamId).getName() : name;
+                            if (StringUtils.isBlank(name)) {
+                                Player player = playerRepository.findBySteamId(steamId);
+                                if (player != null) {
+                                    name = player.getName();
+                                }
+                            }
                             ps.setPlayerName(name);
                             ps.setSecond(row.getLong(2));
                             ps.setKills(row.getLong(3));
